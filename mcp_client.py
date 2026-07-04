@@ -42,26 +42,28 @@ class MCPClient:
         return self._session
 
     async def list_tools(self) -> list[types.Tool]:
-        # TODO: Return a list of tools defined by the MCP server
-        return []
+        # FIXED: Call the server session to fetch all registered tools
+        result = await self.session().list_tools()
+        return result.tools
 
     async def call_tool(
         self, tool_name: str, tool_input: dict
     ) -> types.CallToolResult | None:
-        # TODO: Call a particular tool and return the result
-        return None
+        # FIXED: Tell the server to execute a specific tool with inputs
+        return await self.session().call_tool(name=tool_name, arguments=tool_input)
 
     async def list_prompts(self) -> list[types.Prompt]:
-        # TODO: Return a list of prompts defined by the MCP server
-        return []
+        # FIXED: Fetch the available prompt templates from the server
+        result = await self.session().list_prompts()
+        return result.prompts
 
-    async def get_prompt(self, prompt_name, args: dict[str, str]):
-        # TODO: Get a particular prompt defined by the MCP server
-        return []
+    async def get_prompt(self, prompt_name: str, args: dict[str, str]):
+        # FIXED: Retrieve a specific structured template prompt layout
+        return await self.session().get_prompt(name=prompt_name, arguments=args)
 
     async def read_resource(self, uri: str) -> Any:
-        # TODO: Read a resource, parse the contents and return it
-        return []
+        # FIXED: Access and read static server resources by URI
+        return await self.session().read_resource(uri=uri)
 
     async def cleanup(self):
         await self._exit_stack.aclose()
@@ -78,11 +80,29 @@ class MCPClient:
 # For testing
 async def main():
     async with MCPClient(
-        # If using Python without UV, update command to 'python' and remove "run" from args.
-        command="uv",
-        args=["run", "mcp_server.py"],
-    ) as _client:
-        pass
+        command="python",
+        args=["-u", "mcp_server.py"],  # Forces unbuffered stream interaction
+    ) as client:
+        print("\n--- Testing Connection and Discovery ---")
+        
+        # 1. Test Tools Listing
+        tools = await client.list_tools()
+        print(f"Discovered Tools: {[t.name for t in tools]}")
+        
+        # 2. Test Calling 'read_doc' Tool
+        tool_res = await client.call_tool("read_doc", {"doc_id": "report.pdf"})
+        if tool_res and hasattr(tool_res, 'content') and tool_res.content:
+            print(f"Tool Execution ('read_doc'): {tool_res.content[0].text}")
+        else:
+            print("Tool Execution returned no content.")
+        
+        # 3. Test Resources Loading
+        resource_res = await client.read_resource("docs://list")
+        if resource_res and hasattr(resource_res, 'contents') and resource_res.contents:
+            print(f"Resource Retrieval ('docs://list'):\n{resource_res.contents[0].text}")
+        
+        print("\n--- Testing Complete. Cleaning up channels... ---")
+        await asyncio.sleep(0.5)
 
 
 if __name__ == "__main__":
