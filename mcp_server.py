@@ -1,6 +1,7 @@
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field  # Essential for using the Field decorator arguments
 
-# Initialize FastMCP server instance matching your variable name 'mcp'
+# Initialize FastMCP server instance
 mcp = FastMCP("DocumentMCP", log_level="ERROR")
 
 docs = {
@@ -12,29 +13,42 @@ docs = {
     "spec.txt": "These specifications define the technical requirements for the equipment.",
 }
 
-# 1. Tool to read a doc
-@mcp.tool()
-def read_doc(doc_id: str) -> str:
-    """Read the content of a specific document by its ID."""
-    if doc_id in docs:
-        return docs[doc_id]
-    return f"Error: Document '{doc_id}' not found."
+# 1. Updated Tool to read doc contents using explicit Pydantic Fields
+@mcp.tool(
+    name="read_doc_contents",
+    description="Read the contents of a document and return it as a string."
+)
+def read_document(
+    doc_id: str = Field(..., description="Id of the document to read")
+) -> str:
+    if doc_id not in docs:
+        raise ValueError(f"Doc with id {doc_id} not found")
+    return docs[doc_id]
 
-# 2. Tool to edit a doc
-@mcp.tool()
-def edit_doc(doc_id: str, content: str) -> str:
-    """Edit or update the content of an existing document or create a new one."""
-    docs[doc_id] = content
+# 2. Updated Tool to edit a document with find-and-replace using Fields
+@mcp.tool(
+    name="edit_document",
+    description="Edit a document by replacing a string in the documents content with a new string."
+)
+def edit_document(
+    doc_id: str = Field(..., description="Id of the document that will be edited"),
+    old_str: str = Field(..., description="The text to replace. Must match exactly, including whitespace."),
+    new_str: str = Field(..., description="The new text to insert in place of the old text.")
+) -> str:
+    if doc_id not in docs:
+        raise ValueError(f"Doc with id {doc_id} not found")
+    
+    docs[doc_id] = docs[doc_id].replace(old_str, new_str)
     return f"Success: Document '{doc_id}' updated successfully."
 
 # 3. Resource to return all doc IDs
-@mcp.resource("docs://list")
+@mcp.resource("docs://documents")
 def list_doc_ids() -> str:
     """Returns a list of all available document IDs in the registry."""
     return "\n".join(docs.keys())
 
 # 4. Resource to return the contents of a particular doc
-@mcp.resource("docs://item/{doc_id}")
+@mcp.resource("docs://documents/{doc_id}")
 def get_doc_content(doc_id: str) -> str:
     """Fetches the raw, static content of a specific document registry item."""
     if doc_id in docs:
