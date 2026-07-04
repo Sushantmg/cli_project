@@ -42,27 +42,22 @@ class MCPClient:
         return self._session
 
     async def list_tools(self) -> list[types.Tool]:
-        # FIXED: Call the server session to fetch all registered tools
         result = await self.session().list_tools()
         return result.tools
 
     async def call_tool(
         self, tool_name: str, tool_input: dict
     ) -> types.CallToolResult | None:
-        # FIXED: Tell the server to execute a specific tool with inputs
         return await self.session().call_tool(name=tool_name, arguments=tool_input)
 
     async def list_prompts(self) -> list[types.Prompt]:
-        # FIXED: Fetch the available prompt templates from the server
         result = await self.session().list_prompts()
         return result.prompts
 
     async def get_prompt(self, prompt_name: str, args: dict[str, str]):
-        # FIXED: Retrieve a specific structured template prompt layout
         return await self.session().get_prompt(name=prompt_name, arguments=args)
 
     async def read_resource(self, uri: str) -> Any:
-        # FIXED: Access and read static server resources by URI
         return await self.session().read_resource(uri=uri)
 
     async def cleanup(self):
@@ -89,17 +84,36 @@ async def main():
         tools = await client.list_tools()
         print(f"Discovered Tools: {[t.name for t in tools]}")
         
-        # 2. Test Calling 'read_doc' Tool
-        tool_res = await client.call_tool("read_doc", {"doc_id": "report.pdf"})
+        # 2. Test Calling the newly renamed 'read_doc_contents' Tool
+        print("\nCalling tool 'read_doc_contents'...")
+        tool_res = await client.call_tool("read_doc_contents", {"doc_id": "report.pdf"})
         if tool_res and hasattr(tool_res, 'content') and tool_res.content:
-            print(f"Tool Execution ('read_doc'): {tool_res.content[0].text}")
+            print(f"Tool Execution Result: {tool_res.content[0].text}")
         else:
             print("Tool Execution returned no content.")
+            
+        # 3. Test Calling the newly renamed 'edit_document' Tool
+        print("\nCalling tool 'edit_document' (Modifying report.pdf)...")
+        edit_res = await client.call_tool(
+            "edit_document", 
+            {
+                "doc_id": "report.pdf", 
+                "old_str": "20m condenser tower", 
+                "new_str": "45m upgraded cooling tower"
+            }
+        )
+        if edit_res and hasattr(edit_res, 'content') and edit_res.content:
+            print(f"Tool Execution Result: {edit_res.content[0].text}")
+            
+            # Re-read to prove it actually updated in the server's memory!
+            verify_res = await client.call_tool("read_doc_contents", {"doc_id": "report.pdf"})
+            print(f"Verified Updated Content: {verify_res.content[0].text}")
         
-        # 3. Test Resources Loading
+        # 4. Test Resources Loading
+        print("\nFetching resource 'docs://list'...")
         resource_res = await client.read_resource("docs://list")
         if resource_res and hasattr(resource_res, 'contents') and resource_res.contents:
-            print(f"Resource Retrieval ('docs://list'):\n{resource_res.contents[0].text}")
+            print(f"Resource Retrieval Layout:\n{resource_res.contents[0].text}")
         
         print("\n--- Testing Complete. Cleaning up channels... ---")
         await asyncio.sleep(0.5)
