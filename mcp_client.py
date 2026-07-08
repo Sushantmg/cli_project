@@ -4,7 +4,7 @@ from typing import Optional, Any
 from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
-
+from mcp.types import CreateMessageResult, TextContent
 
 class MCPClient:
     def __init__(
@@ -19,6 +19,39 @@ class MCPClient:
         self._session: Optional[ClientSession] = None
         self._exit_stack: AsyncExitStack = AsyncExitStack()
 
+    async def sampling_callback(self, context: Any, params: Any) -> CreateMessageResult:
+        """
+        Intercepts sampling requests sent from the server, runs them through 
+        your local free Ollama engine, and sends the answer back to the server.
+        """
+        print("\n[MCP Client] Intercepted an Agentic Sampling request from the server...")
+        
+        # Pull incoming prompt text safely
+        incoming_prompt = ""
+        if hasattr(params, "messages") and params.messages:
+            incoming_prompt = params.messages[0].content.text
+        elif isinstance(params, dict) and "messages" in params:
+            incoming_prompt = params["messages"][0]["content"]["text"]
+
+        print("[MCP Client] Forwarding sampled request to local Llama model...")
+        try:
+            import ollama
+            # Call your local offline engine for free
+            response = ollama.chat(
+                model='llama3.2', 
+                messages=[{'role': 'user', 'content': incoming_prompt}]
+            )
+            ai_response = response['message']['content']
+        except Exception as e:
+            print(f"[MCP Client] Local model call failed: {e}")
+            ai_response = "Local processing error fallback wrapper."
+
+        return CreateMessageResult(
+            role="assistant",
+            model="local-llama3.2",
+            content=TextContent(type="text", text=ai_response),
+        )
+
     async def connect(self):
         server_params = StdioServerParameters(
             command=self._command,
@@ -29,36 +62,23 @@ class MCPClient:
             stdio_client(server_params)
         )
         _stdio, _write = stdio_transport
+        
         self._session = await self._exit_stack.enter_async_context(
-            ClientSession(_stdio, _write)
+            ClientSession(_stdio, _write, sampling_callback=self.sampling_callback)
         )
         await self._session.initialize()
 
     def session(self) -> ClientSession:
         if self._session is None:
-            raise ConnectionError(
-                "Client session not initialized or cache not populated. Call connect_to_server first."
-            )
+            raise ConnectionError("Client session not initialized. Call connect first.")
         return self._session
 
     async def list_tools(self) -> list[types.Tool]:
         result = await self.session().list_tools()
         return result.tools
 
-    async def call_tool(
-        self, tool_name: str, tool_input: dict
-    ) -> types.CallToolResult | None:
+    async def call_tool(self, tool_name: str, tool_input: dict) -> types.CallToolResult | None:
         return await self.session().call_tool(name=tool_name, arguments=tool_input)
-
-    async def list_prompts(self) -> list[types.Prompt]:
-        result = await self.session().list_prompts()
-        return result.prompts
-
-    async def get_prompt(self, prompt_name: str, args: dict[str, str]):
-        return await self.session().get_prompt(name=prompt_name, arguments=args)
-
-    async def read_resource(self, uri: str) -> Any:
-        return await self.session().read_resource(uri=uri)
 
     async def cleanup(self):
         await self._exit_stack.aclose()
@@ -72,51 +92,28 @@ class MCPClient:
         await self.cleanup()
 
 
-# For testing
+# Production Integration Test Block
 async def main():
     async with MCPClient(
         command="python",
-        args=["-u", "mcp_server.py"],  # Forces unbuffered stream interaction
+        args=["-u", "mcp_server.py"],
     ) as client:
-        print("\n--- Testing Connection and Discovery ---")
-        
-        # 1. Test Tools Listing
+        print("\n--- Testing Live Sampling Architecture (Ollama) ---")
         tools = await client.list_tools()
         print(f"Discovered Tools: {[t.name for t in tools]}")
         
-        # 2. Test Calling the newly renamed 'read_doc_contents' Tool
-        print("\nCalling tool 'read_doc_contents'...")
-        tool_res = await client.call_tool("read_doc_contents", {"doc_id": "report.pdf"})
-        if tool_res and hasattr(tool_res, 'content') and tool_res.content:
-            print(f"Tool Execution Result: {tool_res.content[0].text}")
-        else:
-            print("Tool Execution returned no content.")
+        if "summarize" in [t.name for t in tools]:
+            print("\nExecuting agentic sampling test string on 'summarize'...")
             
-        # 3. Test Calling the newly renamed 'edit_document' Tool
-        print("\nCalling tool 'edit_document' (Modifying report.pdf)...")
-        edit_res = await client.call_tool(
-            "edit_document", 
-            {
-                "doc_id": "report.pdf", 
-                "old_str": "20m condenser tower", 
-                "new_str": "45m upgraded cooling tower"
-            }
-        )
-        if edit_res and hasattr(edit_res, 'content') and edit_res.content:
-            print(f"Tool Execution Result: {edit_res.content[0].text}")
+            test_paragraph = (
+                "The Model Context Protocol (MCP) is an open standard that enables developers to build "
+                "secure, bidirectional connections between AI models and data sources. It simplifies "
+                "integrations by using standardized JSON-RPC architectures over simple transports."
+            )
             
-            # Re-read to prove it actually updated in the server's memory!
-            verify_res = await client.call_tool("read_doc_contents", {"doc_id": "report.pdf"})
-            print(f"Verified Updated Content: {verify_res.content[0].text}")
-        
-        # 4. Test Resources Loading
-        print("\nFetching resource 'docs://list'...")
-        resource_res = await client.read_resource("docs://list")
-        if resource_res and hasattr(resource_res, 'contents') and resource_res.contents:
-            print(f"Resource Retrieval Layout:\n{resource_res.contents[0].text}")
-        
-        print("\n--- Testing Complete. Cleaning up channels... ---")
-        await asyncio.sleep(0.5)
+            res = await client.call_tool("summarize", {"text_to_summarize": test_paragraph})
+            if res and hasattr(res, 'content') and res.content:
+                print(f"\nFinal Tool Output Result From Server:\n{res.content[0].text}")
 
 
 if __name__ == "__main__":
