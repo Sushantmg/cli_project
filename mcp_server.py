@@ -1,6 +1,6 @@
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
+from mcp.types import SamplingMessage, TextContent
 from pydantic import Field  # Essential for using the Field decorator arguments
-
 # Initialize FastMCP server instance
 mcp = FastMCP("DocumentMCP", log_level="ERROR")
 
@@ -69,6 +69,37 @@ def summarize_doc(doc_id: str) -> str:
     content = docs.get(doc_id, f"[Document '{doc_id}' not found]")
     return f"Please provide a concise high-level summary and bulleted key takeaways for this document:\n\n{content}"
 
+# 7. Advanced Agentic Sampling Tool to summarize text using the LLM session context
+@mcp.tool()
+async def summarize(text_to_summarize: str, ctx: Context) -> str:
+    """Uses Agentic Sampling to let the host AI summarize any raw input block of text."""
+    prompt = f"""
+Please summarize the following text:
+{text_to_summarize}
+"""
+
+    # Ask the host AI model via the current active session to process the summary
+    result = await ctx.session.create_message(
+        messages=[
+            SamplingMessage(
+                role="user",
+                content=TextContent(
+                    type="text",
+                    text=prompt.strip()
+                )
+            )
+        ],
+        max_tokens=4000,
+        system_prompt="You are a helpful research assistant.",
+    )
+
+    # Validate and return the response text cleanly
+    if hasattr(result.content, "text"):
+        return result.content.text
+    elif isinstance(result.content, dict) and "text" in result.content:
+        return result.content["text"]
+    else:
+        raise ValueError("Sampling response did not contain expected text content.")
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
